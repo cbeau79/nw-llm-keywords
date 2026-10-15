@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Keyword Tagging Eval</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky top bar; article rail on the left; main column compares Editor vs LLM side by side, verdict panel underneath. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --ink:#16191f; --muted:#5d6573; --line:#dde1e7;
+  --accent:#2747c9; --accent-soft:#e7ebfb;
+  --editor:#9a5b00; --editor-soft:#fbf0de;
+  --llm:#0b7a72; --llm-soft:#dff3f0;
+  --good:#1e7a3c; --good-soft:#e1f3e6; --bad:#b4232c; --bad-soft:#fbe4e5; --warn-soft:#fff4d6;
+  --f-display:"Source Serif 4", Georgia, serif;
+  --f-body:"Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111419; --surface:#1a1e25; --ink:#e8ebf0; --muted:#9aa3b2; --line:#2c323c;
+  --accent:#8ea5ff; --accent-soft:#232b4a;
+  --editor:#f0b45a; --editor-soft:#3a2c14; --llm:#5fd0c4; --llm-soft:#143532;
+  --good:#6fd38e; --good-soft:#163222; --bad:#ff8a90; --bad-soft:#3b1a1d; --warn-soft:#3a3115; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111419; --surface:#1a1e25; --ink:#e8ebf0; --muted:#9aa3b2; --line:#2c323c;
+  --accent:#8ea5ff; --accent-soft:#232b4a;
+  --editor:#f0b45a; --editor-soft:#3a2c14; --llm:#5fd0c4; --llm-soft:#143532;
+  --good:#6fd38e; --good-soft:#163222; --bad:#ff8a90; --bad-soft:#3b1a1d; --warn-soft:#3a3115; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}
+.top h1{font-family:var(--f-display);font-size:18px;margin:0;font-weight:700}
+.tally{display:flex;flex-wrap:wrap;gap:6px;font-size:12px}
+.tally span{padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);font-variant-numeric:tabular-nums}
+.tally b{font-weight:600}
+.top .spacer{flex:1}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 12px;font-weight:500}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface)}
+.save-state{font-size:12px;color:var(--muted)}
+
+.wrap{display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;max-width:1280px;margin:0 auto;
+  padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.rail{display:flex;flex-direction:column;gap:4px;position:sticky;top:76px;align-self:start;max-height:calc(100vh - 96px);overflow:auto}
+.rail button{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start;text-align:left;border:1px solid transparent;background:none;border-radius:6px;padding:8px}
+.rail button:hover{background:var(--surface)}
+.rail button[aria-current="true"]{background:var(--surface);border-color:var(--line)}
+.rail .t{font-size:13px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dot{width:18px;height:18px;border-radius:50%;border:1.5px dashed var(--line);display:grid;place-items:center;font-size:10px;font-weight:700;margin-top:1px}
+.dot.editor{background:var(--editor-soft);border:1.5px solid var(--editor);color:var(--editor)}
+.dot.llm{background:var(--llm-soft);border:1.5px solid var(--llm);color:var(--llm)}
+.dot.equal{background:var(--accent-soft);border:1.5px solid var(--accent);color:var(--accent)}
+
+main{min-width:0;display:flex;flex-direction:column;gap:16px}
+.head{display:flex;flex-direction:column;gap:6px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.head h2{font-family:var(--f-display);font-size:26px;line-height:1.2;margin:0;text-wrap:balance}
+.head .meta{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--muted)}
+.head a{color:var(--accent);text-decoration:none;font-weight:500}
+.head a:hover{text-decoration:underline}
+.mono{font-family:var(--f-mono);font-size:12px}
+.overlap{font-size:13px;color:var(--muted)}
+.overlap b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+.compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.7fr);gap:16px}
+.col{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;min-width:0}
+.col>header{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:8px}
+.col.ed>header{border-top:3px solid var(--editor)}
+.col.ll>header{border-top:3px solid var(--llm)}
+.col>header h3{margin:0;font-size:14px;font-weight:700}
+.col>header .n{font-size:12px;color:var(--muted)}
+.sect{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.sect+.sect{border-top:1px solid var(--line)}
+.sect h4{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:6px;padding:4px 8px;font-size:13px;border:1px solid var(--line);background:var(--bg)}
+.chip .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.chip.match{background:var(--good-soft);border-color:transparent}.chip.match .k{color:var(--good)}
+.chip.close{background:var(--warn-soft);border-color:transparent}.chip.close .k{color:var(--editor)}
+.chip.miss{background:var(--bad-soft);border-color:transparent}.chip.miss .k{color:var(--bad)}
+.chip.cat{color:var(--muted)}
+.legend{font-size:12px;color:var(--muted)}
+
+.facet{border-top:1px solid var(--line)}
+.facet:first-of-type{border-top:0}
+.facet>h4{margin:0;padding:10px 14px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.tag{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 14px;border-left:3px solid transparent}
+.tag.wrong{background:var(--bad-soft);border-left-color:var(--bad)}
+.tag.wrong .name{text-decoration:line-through;text-decoration-color:var(--bad)}
+.tag .line1{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;min-width:0}
+.tag .name{font-weight:600;font-size:14px}
+.pill{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;border-radius:4px;padding:1px 6px}
+.pill.primary{background:var(--accent-soft);color:var(--accent)}
+.pill.secondary{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.pill.inEd{background:var(--good-soft);color:var(--good)}
+.pill.close{background:var(--warn-soft);color:var(--editor)}
+.pill.new{background:var(--llm-soft);color:var(--llm)}
+.pill.arc{background:var(--editor-soft);color:var(--editor)}
+.rel{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rel i{display:block;width:44px;height:5px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.rel i::after{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:var(--llm)}
+.ev{grid-column:1/2;font-size:12.5px;color:var(--muted);border-left:2px solid var(--line);padding-left:8px;font-style:italic}
+.flag{grid-row:1/3;grid-column:2;align-self:start;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:12px;color:var(--muted);white-space:nowrap}
+.flag:hover{border-color:var(--bad);color:var(--bad)}
+.flag[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:var(--surface)}
+
+.verdict{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.verdict h3{margin:0;font-size:15px}
+.verdict p.hint{margin:0;font-size:12px;color:var(--muted)}
+.choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.choice{border:1.5px solid var(--line);background:var(--bg);border-radius:8px;padding:10px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left}
+.choice .lbl{font-weight:700;font-size:14px}
+.choice .sub{font-size:12px;color:var(--muted)}
+.choice kbd{font-family:var(--f-mono);font-size:10px;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted);background:var(--surface)}
+.choice:hover{border-color:var(--muted)}
+.choice[data-v="editor"][aria-pressed="true"]{border-color:var(--editor);background:var(--editor-soft)}
+.choice[data-v="equal"][aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.choice[data-v="llm"][aria-pressed="true"]{border-color:var(--llm);background:var(--llm-soft)}
+.verdict label{font-size:12px;font-weight:600;color:var(--muted)}
+.verdict textarea{width:100%;min-height:72px;resize:vertical;border:1px solid var(--line);border-radius:6px;padding:8px;background:var(--bg);color:var(--ink);font:inherit}
+.nav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.nav .spacer{flex:1}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;font-size:13px}
+
+@media (max-width:860px){
+  .wrap{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static;flex-direction:row;overflow-x:auto;max-height:none}
+  .rail button{grid-template-columns:22px;padding:6px}
+  .rail .t{display:none}
+  .compare{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:480px){.choices{grid-template-columns:minmax(0,1fr)}.head h2{font-size:22px}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+[hidden]{display:none!important}
+body{margin:0}
+.who{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.who input{font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px;width:150px}
+.who.need input{border-color:var(--bad)}
+.howto{grid-column:1/-1;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--muted)}
+.howto b{color:var(--ink)}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>Keyword Tagging Eval</h1>
+  <div class="tally" id="tally"></div>
+  <div class="spacer"></div>
+  <label class="who" id="whoWrap" for="reviewer">Your name <input id="reviewer" autocomplete="name" placeholder="e.g. Sam Patel"></label>
+  <span class="save-state" id="saveState">Loading…</span>
+  <button class="btn" id="exportBtn" type="button">Export CSV</button>
+</div>
+
+<div class="wrap">
+  <div class="howto"><b>How this works:</b> rate each article, then press <b>Export CSV</b> and send the file to Chris. Ratings are kept in this browser only, so use the same browser until you export.</div>
+  <nav class="rail" id="rail" aria-label="Articles"></nav>
+  <main id="main"></main>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+let ARTICLES = [];
+const FACET_ORDER = ["People","Organisations","Places","Events","Topics & Issues","Broad Story Arcs"];
+const VERDICTS = {editor:{lbl:"Editor better",short:"E",sub:"Human keywords are the better set"},equal:{lbl:"About equal",short:"=",sub:"No meaningful difference"},llm:{lbl:"LLM better",short:"L",sub:"LLM tags are the better set"}};
+
+/* ---------- matching ---------- */
+const norm = s => (" " + String(s).toLowerCase().replace(/[^a-z0-9]+/g," ").trim() + " ");
+function candidates(tag){ const parts = String(tag).split(">").map(p=>p.trim()); return [tag, ...parts].map(norm); }
+function compare(edKw, llmTag){
+  const e = norm(edKw), cs = candidates(llmTag);
+  if (cs.some(c => c === e)) return "match";
+  if (cs.some(c => { const [a,b] = c.length < e.length ? [c,e] : [e,c]; return a.trim().length >= 3 && b.includes(a); })) return "close";
+  return null;
+}
+function analyse(a){
+  const ed = a.editorKeywords.map(k => {
+    let best = null, by = null;
+    for (const t of a.tags){ const r = compare(k, t.tag); if (r === "match"){best="match";by=t.tag;break;} if (r==="close" && !best){best="close";by=t.tag;} }
+    return {kw:k, state: best || "miss", by};
+  });
+  const tags = a.tags.map((t,i) => {
+    let best = null;
+    for (const k of a.editorKeywords){ const r = compare(k, t.tag); if (r==="match"){best="match";break;} if (r==="close") best="close"; }
+    return {...t, i, state: best || "new"};
+  });
+  return {ed, tags};
+}
+
+/* ---------- state ---------- */
+let idx = 0;
+let ratings = {};            // articleId -> {verdict, wrong:[tag], note, at}
+const LS_KEY = "kw-eval-ratings";
+try { idx = Math.max(0, Math.min(ARTICLES.length-1, +localStorage.getItem("kw-eval-idx") || 0)); } catch(e){}
+try { ratings = JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch(e){ ratings = {}; }
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function r(a){ return ratings[a.id] || (ratings[a.id] = {verdict:null, wrong:[], note:""}); }
+
+/* ---------- persistence (this browser only) ---------- */
+let noteTimer = null;
+function setSave(t){ $("#saveState").textContent = t; }
+function persist(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(ratings)); setSave("Saved in this browser"); }
+  catch(e){ setSave("This browser is blocking storage. Export before closing the tab"); }
+}
+let reviewer = "";
+try { reviewer = localStorage.getItem("kw-eval-reviewer") || ""; } catch(e){}
+
+/* ---------- render ---------- */
+function renderTally(){
+  const c = {editor:0,equal:0,llm:0}; let done = 0;
+  ARTICLES.forEach(a => { const v = ratings[a.id]?.verdict; if (v){ c[v]++; done++; } });
+  const wrong = ARTICLES.reduce((n,a) => n + (ratings[a.id]?.wrong?.length || 0), 0);
+  $("#tally").innerHTML =
+    `<span><b>${done}</b> / ${ARTICLES.length} rated</span>` +
+    `<span>LLM better <b>${c.llm}</b></span><span>Equal <b>${c.equal}</b></span><span>Editor better <b>${c.editor}</b></span>` +
+    `<span>Tags flagged wrong <b>${wrong}</b></span>`;
+}
+function renderRail(){
+  $("#rail").innerHTML = ARTICLES.map((a,i) => {
+    const v = ratings[a.id]?.verdict;
+    return `<button type="button" data-i="${i}" aria-current="${i===idx}" title="${esc(a.title)}">
+      <span class="dot ${v||""}">${v ? VERDICTS[v].short : ""}</span><span class="t">${esc(a.title)}</span></button>`;
+  }).join("");
+}
+function renderMain(){
+  const a = ARTICLES[idx], an = analyse(a), rt = r(a);
+  const matched = an.ed.filter(e => e.state !== "miss").length;
+  const newCount = an.tags.filter(t => t.state === "new").length;
+  const groups = {};
+  an.tags.forEach(t => (groups[t.facet] ||= []).push(t));
+  const facets = [...FACET_ORDER.filter(f => groups[f]), ...Object.keys(groups).filter(f => !FACET_ORDER.includes(f))];
+  const stateLbl = {match:"Matched", close:"Close match", miss:"LLM missed"};
+  const tagPill = {match:'<span class="pill inEd">In editor set</span>', close:'<span class="pill close">Close to editor kw</span>', new:'<span class="pill new">LLM only</span>'};
+
+  $("#main").innerHTML = `
+    <div class="head">
+      <span class="eyebrow">Article ${idx+1} of ${ARTICLES.length}</span>
+      <h2>${esc(a.title)}</h2>
+      <div class="meta"><a href="${esc(a.url)}" target="_blank" rel="noopener">Read article ↗</a><span class="mono">ID ${esc(a.id)}</span></div>
+      <div class="overlap">Editor keywords covered by LLM: <b>${matched} of ${an.ed.length}</b> · LLM-only tags: <b>${newCount}</b> of ${an.tags.length}</div>
+    </div>
+    <div class="compare">
+      <section class="col ed">
+        <header><h3>Editor</h3><span class="n">${an.ed.length} keywords</span></header>
+        <div class="sect"><h4>Keywords</h4>
+          <div class="chips">${an.ed.map(e => `<span class="chip ${e.state}" title="${e.by ? "LLM tag: " + esc(e.by) : "No LLM equivalent"}"><span>${esc(e.kw)}</span><span class="k">${stateLbl[e.state]}</span></span>`).join("") || '<span class="legend">None</span>'}</div>
+        </div>
+        <div class="sect"><h4>Categories</h4>
+          <div class="chips">${a.editorCategories.map(c => `<span class="chip cat">${esc(c)}</span>`).join("") || '<span class="legend">None</span>'}</div>
+        </div>
+        <div class="sect legend">Matching is automatic and literal (case and punctuation ignored). Use it as a guide, not a score.</div>
+      </section>
+      <section class="col ll">
+        <header><h3>LLM</h3><span class="n">${an.tags.length} tags · flag any that are wrong</span></header>
+        ${facets.map(f => `<div class="facet"><h4>${esc(f)}</h4>${groups[f].map(t => {
+          const wrong = rt.wrong.includes(t.tag);
+          const rel = t.relevance == null ? "" : `<span class="rel" title="Relevance"><i style="--w:${Math.round(t.relevance*100)}%"></i>${t.relevance.toFixed(2)}</span>`;
+          return `<div class="tag ${wrong?"wrong":""}">
+            <div class="line1"><span class="name">${esc(t.tag)}</span>
+              ${t.salience ? `<span class="pill ${t.salience==="primary"?"primary":"secondary"}">${esc(t.salience)}</span>` : ""}
+              ${rel}${tagPill[t.state]}${t.newArc ? '<span class="pill arc">New arc</span>' : ""}</div>
+            ${t.evidence ? `<div class="ev">“${esc(t.evidence)}”</div>` : ""}
+            <button type="button" class="flag" data-tag="${esc(t.tag)}" aria-pressed="${wrong}">${wrong ? "✕ Wrong" : "Flag wrong"}</button>
+          </div>`;}).join("")}</div>`).join("")}
+      </section>
+    </div>
+    <section class="verdict">
+      <div><h3>Which set describes this article better?</h3><p class="hint">Judge accuracy and usefulness for discovery, not just volume. Keys 1–3 to choose, ← → to move.</p></div>
+      <div class="choices">${["editor","equal","llm"].map((v,i) => `<button type="button" class="choice" data-v="${v}" aria-pressed="${rt.verdict===v}"><span class="lbl">${VERDICTS[v].lbl} <kbd>${i+1}</kbd></span><span class="sub">${VERDICTS[v].sub}</span></button>`).join("")}</div>
+      <label for="note">Notes (optional)</label>
+      <textarea id="note" placeholder="What did the LLM get right or wrong? Any keyword it should have added?">${esc(rt.note)}</textarea>
+      <div class="nav">
+        <button type="button" class="btn" id="prev" ${idx===0?"disabled":""}>← Previous</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="nextUnrated">Next unrated</button>
+        <button type="button" class="btn primary" id="next" ${idx===ARTICLES.length-1?"disabled":""}>Next →</button>
+      </div>
+    </section>`;
+}
+function render(){ renderTally(); renderRail(); renderMain(); }
+
+/* ---------- actions ---------- */
+function go(i){ idx = Math.max(0, Math.min(ARTICLES.length-1, i)); try{localStorage.setItem("kw-eval-idx", idx);}catch(e){} render(); window.scrollTo({top:0}); }
+function touch(a){ r(a).at = new Date().toISOString(); }
+function setVerdict(v){ const a = ARTICLES[idx], rt = r(a); rt.verdict = rt.verdict === v ? null : v; touch(a); renderTally(); renderRail();
+  document.querySelectorAll(".choice").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === rt.verdict)); persist(); }
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.closest("#rail")) return go(+t.dataset.i);
+  if (t.classList.contains("choice")) return setVerdict(t.dataset.v);
+  if (t.classList.contains("flag")){
+    const a = ARTICLES[idx], rt = r(a), tag = t.dataset.tag;
+    rt.wrong = rt.wrong.includes(tag) ? rt.wrong.filter(x => x !== tag) : [...rt.wrong, tag];
+    touch(a); const note = $("#note")?.value; renderMain(); if (note != null) $("#note").value = note; renderTally(); persist(); return;
+  }
+  if (t.id === "prev") return go(idx-1);
+  if (t.id === "next") return go(idx+1);
+  if (t.id === "nextUnrated"){ for (let k=1;k<=ARTICLES.length;k++){ const j=(idx+k)%ARTICLES.length; if (!ratings[ARTICLES[j].id]?.verdict) return go(j); } toast("All articles rated"); return; }
+  if (t.id === "exportBtn") return exportCsv();
+});
+document.addEventListener("input", e => {
+  if (e.target.id !== "note") return;
+  const a = ARTICLES[idx]; r(a).note = e.target.value; touch(a);
+  clearTimeout(noteTimer); setSave("Editing…"); noteTimer = setTimeout(persist, 700);
+});
+document.addEventListener("keydown", e => {
+  if (e.target.closest("textarea,input") || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "1") setVerdict("editor"); else if (e.key === "2") setVerdict("equal"); else if (e.key === "3") setVerdict("llm");
+  else if (e.key === "ArrowRight") go(idx+1); else if (e.key === "ArrowLeft") go(idx-1);
+});
+
+/* ---------- export ---------- */
+function csvCell(v){ v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+function buildCsv(){
+  const head = ["reviewer","article_id","title","url","verdict","editor_keywords","llm_tags","editor_kw_matched","editor_kw_missed_by_llm","llm_only_tags","llm_tags_flagged_wrong","note"];
+  const rows = ARTICLES.map(a => {
+    const an = analyse(a), rt = ratings[a.id] || {};
+    return [reviewer.trim(), a.id, a.title, a.url, rt.verdict ? VERDICTS[rt.verdict].lbl : "",
+      a.editorKeywords.join(" | "), a.tags.map(t=>t.tag).join(" | "),
+      an.ed.filter(e=>e.state!=="miss").map(e=>e.kw).join(" | "),
+      an.ed.filter(e=>e.state==="miss").map(e=>e.kw).join(" | "),
+      an.tags.filter(t=>t.state==="new").map(t=>t.tag).join(" | "),
+      (rt.wrong||[]).join(" | "), rt.note || ""];
+  });
+  return [head, ...rows].map(r => r.map(csvCell).join(",")).join("\n");
+}
+function exportCsv(){
+  if (!reviewer.trim()){ $("#whoWrap").classList.add("need"); $("#reviewer").focus(); toast("Add your name before exporting"); return; }
+  const blob = new Blob([buildCsv()], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  const slug = reviewer.trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  a.href = URL.createObjectURL(blob); a.download = "keyword-eval-" + slug + ".csv";
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast("CSV downloaded");
+}
+let toastTimer; function toast(m){ const el=$("#toast"); el.textContent=m; el.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.hidden=true,2200); }
+
+document.getElementById("reviewer").value = reviewer;
+document.getElementById("reviewer").addEventListener("input", e => {
+  reviewer = e.target.value; $("#whoWrap").classList.remove("need");
+  try { localStorage.setItem("kw-eval-reviewer", reviewer); } catch(err){}
+});
+fetch("data.json", {cache:"no-cache"}).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { ARTICLES = d; idx = Math.min(idx, ARTICLES.length-1); render(); setSave("Saved in this browser"); })
+  .catch(() => { $("#main").innerHTML = '<p>Couldn\'t load the article data (data.json). Reload the page to try again.</p>'; setSave(""); });
+
+</script>
+</body>
+</html>
